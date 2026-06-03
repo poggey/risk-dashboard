@@ -35,6 +35,13 @@ def drawdown_series(returns):
     return drawdown
     ## identical but returns the whole series
 
+def runup_series(returns):
+    '''Returns a series of runups over time.'''
+    cumulative_wealth = (1 + returns).cumprod()
+    trough = cumulative_wealth.cummin()
+    runup = (cumulative_wealth - trough) / trough
+    return runup
+
 def value_at_risk(returns, confidence_level=0.95):
     '''estimates the worst expected loss over the time period at the given confidence level'''
     return np.percentile(returns, (1 - confidence_level) * 100)
