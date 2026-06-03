@@ -70,9 +70,7 @@ def plot_return_distribution(portfolio_returns, confidence_level=0.95):
     var = value_at_risk(portfolio_returns, confidence_level=confidence_level)
     fig = go.Figure()
     fig.add_trace(go.Histogram(x=portfolio_returns, nbinsx=50, name='Daily Returns', marker_color='steelblue', histnorm='probability density'))
-    fig.add_vline(x=var, line_dash='dash', line_color='red', annotation_text=f'{int(confidence_level*100)}% VaR: {var:.2%}', annotation_position='top')
-    fig.add_vline(x=-var, line_dash='dash', line_color='green', annotation_text=f'{int((1-confidence_level)*100)}% Upper Tail: {-var:.2%}', annotation_position='top')
-
+    fig.add_vline(x=var, line_dash='dash', line_color='red', annotation_text=f'VaR: {var:.2%}', annotation_position='top', annotation_font=dict(size=10))
     x_range = np.linspace(portfolio_returns.min(), portfolio_returns.max(), 500)
     
     # Normal distribution curve
@@ -139,6 +137,7 @@ def plot_weights(tickers, weights):
     fig = px.pie(values=weights,
             names=tickers,
             title='Portfolio Composition',
+            hole=0.3,
             template='plotly_white')
     fig.update_traces(textposition='inside', textinfo='percent+label')
     

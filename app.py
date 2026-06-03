@@ -156,11 +156,11 @@ with st.sidebar:
             )
         ## for each ticker, call the rebalance function when there is a change, passing in the ticker name and ticker list
         
-        # Read final values from session state
+        ## Read final values from session state
         raw = np.array([st.session_state[state_key][t] for t in tickers])
         weights = raw / 100
 
-    else:  # By £ amount - this is self explanatory
+    else:  ## By £ amount - this is self explanatory
         st.caption("Enter the amount you'd allocate to each asset")
         
         total_investment = st.number_input(
@@ -194,20 +194,11 @@ with st.sidebar:
     st.divider()
     st.caption("**Current Allocation**")
 
-    import plotly.express as px
-    pie_fig = px.pie(
-        values=weights, 
-        names=tickers,
-        hole=0.4
-    )
-    ## since streamlit reruns at every interaction, no need for fancy piechart, it will just rerun and update
-    pie_fig.update_traces(textposition='inside', textinfo='percent+label')
-    pie_fig.update_layout(
-        showlegend=False,
-        margin=dict(t=10, b=10, l=10, r=10),
-        height=250
-    )
+    pie_fig = plot_weights(tickers, weights)
     st.plotly_chart(pie_fig, use_container_width=True)
+
+    ## since streamlit reruns at every interaction, no need for fancy piechart, it will just rerun and update
+
     
     # Date range  
     st.subheader("Time Period")
@@ -248,3 +239,67 @@ with st.sidebar:
         type="primary",
         use_container_width=True
     )
+
+## sidebar end
+
+## main viualisations after clicking analyse
+if analyse_button:
+    ## if true
+    with st.spinner("Fetching data..."):
+        try:
+            start_str = start_date.strftime('%Y-%m-%d')
+            end_str = end_date.strftime('%Y-%m-%d')
+
+            prices = fetch_prices(tickers, start_date, end_date)
+            returns = calculate_returns(prices)
+            port_ret = portfolio_returns(returns, weights)
+            ## calls on relevant functions to then feed into visualisation functions
+            
+            bench_prices = fetch_prices(benchmark, start_date, end_date)
+            bench_ret = calculate_returns(bench_prices).iloc[:, 0]
+            ## df to 1D series
+        except Exception as e:
+            ## just a broad error identification
+            st.error(f"Error fetching data: {e}")
+            st.stop()
+
+    ## still inside if statement
+    ## Performance metrics - calls functions and returns them in pre-setup columns
+    st.header("Key Performance")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Annualised Return", f"{annualised_return(port_ret):.2%}")
+    c2.metric("Annualised Volatility", f"{annualised_volatility(port_ret):.2%}")
+    c3.metric("Sharpe Ratio", f"{sharpe_ratio(port_ret, risk_free_rate):.2f}")
+    c4.metric("Max Drawdown", f"{max_drawdown(port_ret):.2%}")
+    
+    ## Risk metrics row - same as above
+    st.header("Risk Metrics")
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("95% VaR (daily)", f"{value_at_risk(port_ret):.2%}")
+    c6.metric("95% CVaR (daily)", f"{conditional_value_at_risk(port_ret):.2%}")
+    c7.metric("Sortino Ratio", f"{sortino_ratio(port_ret, risk_free_rate):.2f}")
+    c8.metric("Beta vs Benchmark", f"{beta(port_ret, bench_ret):.2f}")
+    
+    ## Performance chart
+    st.header("Performance")
+    st.plotly_chart(plot_cumulative_portfolio_returns(port_ret, bench_ret), use_container_width=True)
+    ## use_container_width=True tells streamlit to fill available space
+
+    ## Risk charts
+    st.header("Risk Analysis")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.plotly_chart(plot_drawdown(port_ret), use_container_width=True)
+    with col_b:
+        st.plotly_chart(plot_return_distribution(port_ret), use_container_width=True)
+    
+    ## Rolling Sharpe
+    st.plotly_chart(plot_rolling_sharpe(port_ret), use_container_width=True)
+    
+    ## Composition charts side by side
+    st.header("Portfolio Composition")
+    col_c, col_d = st.columns(2)
+    with col_c:
+        st.plotly_chart(plot_weights(tickers, weights), use_container_width=True)
+    with col_d:
+        st.plotly_chart(plot_correlation_heatmap(returns), use_container_width=True)
