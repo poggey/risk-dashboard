@@ -58,19 +58,20 @@ def sortino_ratio(returns, rfr, target_return=0):
     ratio = (annualised_return(returns) - rfr) / annualised_volatility(down_returns)
     return ratio
 
-def beta(portfolio_returns, benchmark_returns):
-    '''beta is a measure of the portfolio's sensitivity to market movements'''
-    if isinstance(portfolio_returns, pd.DataFrame):
-        portfolio_returns = portfolio_returns.iloc[:, 0]
+def beta(asset_returns, benchmark_returns):
+    '''Calculates beta - sensitivity of an asset or portfolio to benchmark movements.
+    Can be used for individual assets or portfolios.'''
+    if isinstance(asset_returns, pd.DataFrame):
+        asset_returns = asset_returns.iloc[:, 0]
     if isinstance(benchmark_returns, pd.DataFrame):
         benchmark_returns = benchmark_returns.iloc[:, 0]
-    
+
     # Align on dates and drop missing so only compare returns on same dates
-    combined = pd.concat([portfolio_returns, benchmark_returns], axis=1).dropna()
-    p, b = combined.iloc[:, 0], combined.iloc[:, 1]
-    
-    covariance = np.cov(p, b)[0, 1]
-    variance = np.var(b)
+    combined = pd.concat([asset_returns, benchmark_returns], axis=1).dropna()
+    asset, bench = combined.iloc[:, 0], combined.iloc[:, 1]
+
+    covariance = np.cov(asset, bench)[0, 1]
+    variance = np.var(bench)
     return covariance / variance
 
 def rolling_sharpe_ratio(returns, window=252, rfr=0.04):

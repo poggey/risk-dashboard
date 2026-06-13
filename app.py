@@ -317,7 +317,7 @@ if st.session_state.get('analysis_done', False):
         st.header("Sleep Test")
         st.caption("How emotionally tough would this portfolio be to hold?")
 
-        # Sliders
+        ## Sliders
         col1, col2 = st.columns(2)
         with col1:
             dd_tolerance = st.slider("Max drawdown you'd accept", 5, 50, 20, format="%d%%")
@@ -331,26 +331,27 @@ if st.session_state.get('analysis_done', False):
         actual_max_dd = abs(dd.min()) * 100
         actual_worst_day = abs(port_ret.min()) * 100
 
-        # Compute longest recovery: count consecutive days in drawdown
+        ## Compute longest recovery: count consecutive days in drawdown
+        ## this probably should have been done in metrics
         in_drawdown = (dd < 0).astype(int)
         drawdown_groups = (in_drawdown != in_drawdown.shift()).cumsum()
         longest_dd_days = in_drawdown.groupby(drawdown_groups).sum().max()
         actual_recovery_months = longest_dd_days / 21  # ~21 trading days per month
 
-        # Count panic moments: days with returns below -3%
+        ## Count panic moments: days with returns below -3% (arbitrary value)
         panic_days = (port_ret < -0.03).sum()
         years_of_data = len(port_ret) / 252
         panic_moments_per_year = panic_days / years_of_data if years_of_data > 0 else 0
 
-        # Score each dimension as 0-100 (how comfortable the user would be)
-        # Use max() to avoid division by zero
+        # Score each dimension as 0-100 - this is just a ratio
+        ## Use max() to avoid division by zero
         dd_score = min(100, (dd_tolerance / max(actual_max_dd, 0.01)) * 100)
         day_score = min(100, (day_shock_tolerance / max(actual_worst_day, 0.01)) * 100)
         recovery_score = min(100, (recovery_tolerance / max(actual_recovery_months, 0.01)) * 100)
         frequency_score = min(100, (frequency_tolerance / max(panic_moments_per_year, 0.01)) * 100)
 
-        # Loss aversion: higher = losses feel worse = harder to sleep
         # Linear scale from 1.0 (score=100) to 3.0 (score=33)
+        ## this is possibly the least logical - could be removed
         loss_aversion_score = 100 - (loss_aversion - 1.0) * 33.33
 
         composite_score = (dd_score + day_score + recovery_score + frequency_score + loss_aversion_score) / 5
@@ -367,7 +368,7 @@ if st.session_state.get('analysis_done', False):
                     {'range': [67, 100], 'color': "lightgreen"}]}))
         st.plotly_chart(fig, use_container_width=True)
 
-        # Radar chart
+        ## chart
         categories = ['Drawdown', 'Recovery', 'Daily Shock', 'Frequency', 'Loss Aversion']
         fig_radar = go.Figure()
         fig_radar.add_trace(go.Scatterpolar(
@@ -385,3 +386,240 @@ if st.session_state.get('analysis_done', False):
         ))
         fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])))
         st.plotly_chart(fig_radar, use_container_width=True)
+
+    with tab3:
+        st.header("Stress Test Scenarios")
+        st.caption("Simulate factor shocks and see how your portfolio would behave through a crisis")
+
+        ## Factor Shocks Section
+        st.subheader("1. Define Factor Shocks")
+        st.caption("Shock the underlying market factors - impacts propagate to assets based on their sensitivities")
+
+        factor_cols = st.columns(3)
+        with factor_cols[0]:
+            market_shock = st.slider("Market Shock", -60, 0, -30, format="%d%%",
+                                     help="Broad equity market decline (e.g., -30% = 2008-style)")
+        with factor_cols[1]:
+            rate_shock = st.slider("Interest Rate Shock (bps)", 0, 300, 100,
+                                   help="Basis points increase (e.g., 200bps = aggressive Fed)")
+        with factor_cols[2]:
+            vix_spike = st.slider("Volatility Spike (VIX)", 20, 80, 40,
+                                  help="VIX level during crisis (normal ~15, 2008 peak ~80)")
+
+        st.divider()
+
+        ## Drawdown Shape Section - to mimic old crises
+        st.subheader("2. Select Crisis Shape")
+        st.caption("How does the crisis unfold over time?")
+
+        shape = st.radio(
+            "Scenario Shape",
+            ["V-Shape (Fast crash, fast recovery)",
+             "U-Shape (Crash, long bottom, slow recovery)",
+             "L-Shape (Crash, no recovery)"],
+            horizontal=True
+        )
+
+        ## Set durations based on shape - historic , as array
+        if "V-Shape" in shape:
+            crash_weeks, bottom_weeks, recovery_weeks = 4, 0, 12
+            shape_desc = "Sharp decline followed by quick recovery (e.g., COVID March 2020)"
+        elif "U-Shape" in shape:
+            crash_weeks, bottom_weeks, recovery_weeks = 8, 16, 24
+            shape_desc = "Decline, extended bottom, gradual recovery (e.g., 2008 Financial Crisis)"
+        else:  # L-Shape
+            crash_weeks, bottom_weeks, recovery_weeks = 8, 52, 0
+            shape_desc = "Decline with no meaningful recovery (e.g., Japan 1990s)"
+
+        st.caption(f"*{shape_desc}*")
+
+        # Show timeline preview based on selection
+        st.caption(f"Timeline: {crash_weeks}wk crash → {bottom_weeks}wk bottom → {recovery_weeks}wk recovery")
+
+        st.divider()
+
+        ## Calculate factor exposures and simulate
+        st.subheader("3. Scenario Results")
+
+        ## Calculate market beta for each asset using beta func
+        asset_betas = {}
+        asset_shocks = {}
+
+        for ticker in st.session_state.analysis_tickers:
+            if ticker in returns.columns:
+                asset_ret = returns[ticker].dropna()
+
+                ## call beta function
+                asset_betas[ticker] = beta(asset_ret, bench_ret)
+
+                ## Estimate rate sensitivity (simplified: higher vol = more rate sensitive)
+                vol = asset_ret.std() * np.sqrt(252)
+                rate_sensitivity = -vol * 0.5
+
+                ## Calculate total shock for this asset
+                market_impact = asset_betas[ticker] * (market_shock / 100)
+                rate_impact = rate_sensitivity * (rate_shock / 10000)
+                vix_impact = -0.002 * (vix_spike - 20)
+
+                asset_shocks[ticker] = (market_impact + rate_impact + vix_impact) * 100
+
+        ## Portfolio-level shock (weighted by portfolio weights)
+        analysis_weights = st.session_state.analysis_weights
+        portfolio_shock = sum(
+            asset_shocks.get(ticker, market_shock) * weight
+            for ticker, weight in zip(st.session_state.analysis_tickers, analysis_weights)
+        )
+
+        ## Display asset-level impacts
+        st.markdown("**Factor Exposures & Estimated Impacts**")
+
+        impact_data = []
+        for ticker, weight in zip(st.session_state.analysis_tickers, analysis_weights):
+            impact_data.append({
+                "Asset": ticker,
+                "Weight": f"{weight*100:.1f}%",
+                "Beta": f"{asset_betas.get(ticker, 1.0):.2f}",
+                "Est. Shock": f"{asset_shocks.get(ticker, market_shock):.1f}%",
+                "Contribution": f"{asset_shocks.get(ticker, market_shock) * weight:.1f}%"
+            })
+
+        st.dataframe(pd.DataFrame(impact_data), use_container_width=True, hide_index=True)
+
+        ## Key stats
+        stat_cols = st.columns(4)
+        stat_cols[0].metric("Portfolio Max Drawdown", f"{portfolio_shock:.1f}%")
+        stat_cols[1].metric("Time to Bottom", f"{crash_weeks} weeks")
+        stat_cols[2].metric("Time at Bottom", f"{bottom_weeks} weeks")
+        stat_cols[3].metric("Recovery Time", f"{recovery_weeks} weeks" if recovery_weeks > 0 else "No recovery")
+
+        total_underwater = crash_weeks + bottom_weeks + recovery_weeks
+        st.caption(f"**Total time underwater: {total_underwater} weeks ({total_underwater/4:.0f} months)**")
+
+        st.divider()
+
+        ## Build and plot the scenario timeline
+        st.subheader("4. Scenario Timeline")
+
+        # Get last 3 months of actual data as "pre-shock" period
+        pre_shock_days = min(63, len(port_ret))  # ~3 months
+        pre_shock_returns = port_ret.iloc[-pre_shock_days:]
+        pre_shock_cumulative = (1 + pre_shock_returns).cumprod()
+        pre_shock_cumulative = pre_shock_cumulative / pre_shock_cumulative.iloc[0]  # Normalize to start at 1
+
+        # Build scenario phases (in weekly steps, convert to daily for smoother chart)
+        days_per_week = 5
+
+        # Crash phase: linear decline to max drawdown
+        crash_days = crash_weeks * days_per_week
+        crash_values = np.linspace(1.0, 1.0 + portfolio_shock/100, crash_days)
+
+        # Bottom phase: oscillate around the bottom with some volatility if not V
+        bottom_days = bottom_weeks * days_per_week
+        if bottom_days > 0:
+            np.random.seed(42)  # Fixed seed for reproducibility
+            noise = np.random.normal(0, 0.005, bottom_days)
+            bottom_base = 1.0 + portfolio_shock/100
+            bottom_values = bottom_base + np.cumsum(noise)
+            # Keep it oscillating around the bottom, not drifting
+            bottom_values = bottom_values - (bottom_values - bottom_base).mean()
+        else:
+            bottom_values = np.array([])
+
+        ## Recovery phase: gradual return toward original value
+        recovery_days = recovery_weeks * days_per_week
+        if recovery_days > 0:
+            recovery_start = bottom_values[-1] if len(bottom_values) > 0 else (1.0 + portfolio_shock/100)
+            recovery_end = 1.0  # Full recovery
+            recovery_values = np.linspace(recovery_start, recovery_end, recovery_days)
+        else:
+            recovery_values = np.array([])
+
+        # Combine
+        scenario_values = np.concatenate([crash_values, bottom_values, recovery_values])
+
+        # Scale scenario to connect with pre-shock data
+        scenario_scaled = scenario_values * pre_shock_cumulative.iloc[-1]
+
+        # Create date index for scenario (continuing from last date)
+        last_date = pre_shock_cumulative.index[-1]
+        scenario_dates = pd.date_range(start=last_date + pd.Timedelta(days=1),
+                                        periods=len(scenario_scaled), freq='B')
+
+        fig_scenario = go.Figure()
+
+        # Pre-shock actual data
+        fig_scenario.add_trace(go.Scatter(
+            x=pre_shock_cumulative.index,
+            y=pre_shock_cumulative.values,
+            mode='lines',
+            name='Actual (Pre-Shock)',
+            line=dict(color='blue', width=2)
+        ))
+
+        # Scenario projection
+        fig_scenario.add_trace(go.Scatter(
+            x=scenario_dates,
+            y=scenario_scaled,
+            mode='lines',
+            name='Scenario Projection',
+            line=dict(color='red', width=2, dash='dot')
+        ))
+
+        ## Add annotations
+        crash_end_date = scenario_dates[crash_days-1] if crash_days > 0 else last_date
+        bottom_end_idx = crash_days + bottom_days - 1
+        bottom_end_date = scenario_dates[bottom_end_idx] if bottom_days > 0 else crash_end_date
+
+        ## Shade the crash phase
+        fig_scenario.add_vrect(
+            x0=last_date, x1=crash_end_date,
+            fillcolor="red", opacity=0.1,
+            annotation_text="Crash", annotation_position="top left"
+        )
+
+        if bottom_days > 0:
+            fig_scenario.add_vrect(
+                x0=crash_end_date, x1=bottom_end_date,
+                fillcolor="orange", opacity=0.1,
+                annotation_text="Bottom", annotation_position="top left"
+            )
+
+        if recovery_days > 0:
+            fig_scenario.add_vrect(
+                x0=bottom_end_date, x1=scenario_dates[-1],
+                fillcolor="green", opacity=0.1,
+                annotation_text="Recovery", annotation_position="top left"
+            )
+
+        fig_scenario.update_layout(
+            title="Portfolio Value Through Simulated Crisis",
+            xaxis_title="Date",
+            yaxis_title="Portfolio Value (Normalized)",
+            template="plotly_white",
+            hovermode="x unified",
+            showlegend=True
+        )
+
+        st.plotly_chart(fig_scenario, use_container_width=True)
+
+        ## Summary interpretation
+        st.markdown("---")
+        st.markdown("**Interpretation**")
+
+        if portfolio_shock > -20:
+            severity = "moderate"
+        elif portfolio_shock > -40:
+            severity = "significant"
+        else:
+            severity = "severe"
+
+        st.markdown(f"""
+        Under this scenario, your portfolio would experience a **{severity}** drawdown of **{portfolio_shock:.1f}%**.
+
+        - **Crash phase**: {crash_weeks} weeks of decline
+        - **Bottom phase**: {bottom_weeks} weeks of consolidation
+        - **Recovery phase**: {recovery_weeks} weeks to recover {"(full recovery)" if recovery_weeks > 0 else "(no recovery modeled)"}
+
+        The assets most affected would be those with higher market beta. Consider whether you could
+        stay invested through {total_underwater} weeks ({total_underwater//4} months) of being underwater.
+        """)
