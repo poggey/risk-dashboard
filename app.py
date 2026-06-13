@@ -38,6 +38,7 @@ ALL_PRESETS = sorted(set([t for sublist in TICKER_PRESETS.values() for t in subl
 
 ## sidebar
 with st.sidebar:
+    st.caption("↓ Scroll down to customise portfolio and re-analyse")
     st.subheader("Quick Start")
     preset_cols = st.columns(3)
 
@@ -234,7 +235,8 @@ with st.sidebar:
     )
     
     st.divider()
-    
+
+    st.caption("Click below to update with your selections")
     analyse_button = st.button(
         "Analyse Portfolio",
         type="primary",
@@ -245,8 +247,11 @@ with st.sidebar:
 
 tab1, tab2, tab3 = st.tabs(["Risk Dashboard", "Sleep Test", "Scenarios"])
 
-if analyse_button:
-    with st.spinner("Fetching data..."):
+## Auto-analyse on first load, or when button is clicked
+first_load = 'analysis_done' not in st.session_state
+
+if analyse_button or first_load:
+    with st.spinner("Fetching data..." if not first_load else "Loading default portfolio..."):
         try:
             prices = fetch_prices(tickers, start_date, end_date)
             returns = calculate_returns(prices)
