@@ -1,129 +1,161 @@
-# Risk Analytics Dashboard
+# Portfolio Risk Dashboard
 
-Interactive Streamlit dashboard for portfolio risk and performance analysis.
+An interactive Streamlit dashboard for analysing portfolio risk and performance. Includes stress testing with factor shocks, behavioural "sleep test" scoring, and scenario simulations with drawdown anatomy.
 
-## Status
-In development.
+![Dashboard Screenshot](outputs/dashboard_metrics.png)
 
-## Scenarios Tab (Stress Test)
+## Live Demo
 
-Simulates how your portfolio would behave during a market crisis by combining **factor shocks** with **drawdown anatomy**.
+**[Try the dashboard here](https://risk-dashboard-padraig.streamlit.app)** — no installation required.
 
-### Core Concept
+## About this project
 
-Instead of arbitrarily saying "what if AAPL drops 40%", this approach:
-1. Shocks underlying **market factors** (not individual assets)
-2. Propagates those shocks to each asset based on its **factor sensitivities**
-3. Simulates the crisis **over time** with realistic phases (crash → bottom → recovery)
+I'm a first-year economics and finance student interested in quantitative risk management. After building a Markowitz portfolio optimiser, I wanted to explore the other side: once you've built a portfolio, how do you measure and stress-test its risk?
 
-### Inputs
+This dashboard lets you:
+- Analyse historical risk metrics (VaR, CVaR, Sharpe, drawdowns)
+- Test whether a portfolio matches your personal risk tolerance
+- Simulate how your portfolio would behave in a market crisis
 
-#### Factor Shocks (3 sliders)
+The goal was to make something interactive rather than static — employers can actually use it, not just read about it.
 
-| Factor | What it represents | How it affects assets |
-|--------|-------------------|----------------------|
-| Market Shock | Broad equity decline (%) | Multiplied by each asset's **beta** |
-| Interest Rate Shock | Rate increase (basis points) | Higher volatility assets are more rate-sensitive |
-| Volatility Spike | VIX level during crisis | Higher VIX = additional negative impact |
+## Features
 
-#### Crisis Shape (3 options)
+### Tab 1: Risk Dashboard
 
-| Shape | Crash | Bottom | Recovery | Real-world example |
-|-------|-------|--------|----------|-------------------|
-| V-Shape | 4 weeks | 0 weeks | 12 weeks | COVID March 2020 |
-| U-Shape | 8 weeks | 16 weeks | 24 weeks | 2008 Financial Crisis |
-| L-Shape | 8 weeks | 52 weeks | 0 weeks | Japan 1990s |
+Core performance and risk metrics for any portfolio.
 
-### Calculations
+| Metric | What it measures |
+|--------|------------------|
+| Annualised Return | Compound annual growth rate |
+| Annualised Volatility | Standard deviation of returns × √252 |
+| Sharpe Ratio | Risk-adjusted return (excess return / volatility) |
+| Max Drawdown | Worst peak-to-trough decline |
+| 95% VaR | Worst expected daily loss at 95% confidence |
+| 95% CVaR | Average loss when VaR is breached |
+| Sortino Ratio | Sharpe but only penalises downside volatility |
+| Beta | Sensitivity to benchmark movements |
 
-#### 1. Calculate each asset's market beta
+**Visualisations:**
+
+![Risk Charts](outputs/dashboard_risk.png)
+
+- Cumulative returns vs benchmark
+- Drawdown chart over time
+- Return distribution with VaR lines
+- Rolling 1-year Sharpe ratio
+
+![Portfolio Composition](outputs/dashboard_composition.png)
+
+- Correlation heatmap
+- Portfolio weights pie chart
+
+### Tab 2: Sleep Test
+
+Behavioural risk scoring — measures how emotionally comfortable you'd be holding the portfolio.
+
+![Sleep Test](outputs/sleep_test.png)
+
+**Inputs (5 sliders):**
+- Max drawdown you'd accept
+- Max recovery period (months)
+- Worst single-day loss you'd accept
+- Panic moments per year (days with >3% loss)
+- Loss aversion factor (how much losses hurt vs gains)
+
+**Scoring:**
 ```
-beta = covariance(asset_returns, benchmark_returns) / variance(benchmark_returns)
-```
-Beta measures how much the asset moves relative to the market. Beta > 1 = more volatile than market.
-
-#### 2. Estimate rate sensitivity
-```
-rate_sensitivity = -volatility × 0.5
-```
-Higher volatility assets are assumed to be more negatively affected by rate shocks (simplified proxy).
-
-#### 3. Calculate total shock per asset
-```
-asset_shock = (beta × market_shock) + (rate_sensitivity × rate_shock/10000) + (vix_impact)
-```
-Where `vix_impact = -0.002 × (vix_level - 20)`
-
-#### 4. Calculate portfolio shock
-```
-portfolio_shock = Σ (asset_shock × asset_weight)
-```
-Weighted sum of individual asset shocks.
-
-### Timeline Chart Construction
-
-The chart shows your portfolio's journey through a simulated crisis:
-
-```
-Portfolio Value
-     │
- 1.0 ┤━━━━━━━━━━━━┓                                    ╭━━━━━
-     │   Actual    ┃                                  ╱
-     │  (3 months) ┃ Crash                          ╱
-     │             ┃  phase                       ╱  Recovery
-     │             ┃    ↘                       ╱    phase
- 0.7 ┤              ┗━━━━━━━━┳━━━━━━━━━━━━━━━━━╱
-     │                       ┃   Bottom phase
-     │                       ┃   (oscillates)
-     ├─────────────┼─────────┼─────────────────┼──────────→ Time
-           Pre     │  Crash  │     Bottom      │  Recovery
+score = (your_tolerance / actual_portfolio_value) × 100
 ```
 
-#### Step-by-step:
+Each dimension scores 0–100. Composite score = simple average of all five.
 
-**1. Pre-shock (blue line)**
-- Takes the last 63 trading days (~3 months) of your actual portfolio returns
-- Calculates cumulative returns: `(1 + daily_return).cumprod()`
-- Normalises to start at 1.0
+**Output:**
+- Gauge chart (red/yellow/green zones)
+- Radar chart comparing your portfolio to the ideal
 
-**2. Crash phase (red shaded region)**
-- Duration: depends on shape (V=4wks, U=8wks, L=8wks)
-- Values: `np.linspace(1.0, 1.0 + portfolio_shock/100, crash_days)`
-- This creates a straight line from current value down to the bottom
-- Example: -30% shock → line from 1.0 to 0.7
+### Tab 3: Stress Test Scenarios
 
-**3. Bottom phase (orange shaded region)**
-- Duration: depends on shape (V=0wks, U=16wks, L=52wks)
-- Values: oscillates around the bottom with random noise
-```python
-noise = np.random.normal(0, 0.005, bottom_days)
-bottom_values = bottom_base + np.cumsum(noise)
+Simulates how your portfolio would behave through a market crisis using **factor shocks** and **drawdown anatomy**.
+
+![Scenario Timeline](outputs/scenario_timeline.png)
+
+**Factor Shocks:**
+
+Instead of arbitrarily saying "what if AAPL drops 40%", this approach shocks underlying market factors:
+
+| Factor | What it represents |
+|--------|-------------------|
+| Market Shock | Broad equity decline (%) — applied via beta |
+| Rate Shock | Interest rate increase (bps) — higher vol assets more sensitive |
+| VIX Spike | Volatility level — additional negative impact |
+
+Each asset's shock is calculated from its factor exposures:
 ```
-- This simulates the choppy, uncertain consolidation period
-
-**4. Recovery phase (green shaded region)**
-- Duration: depends on shape (V=12wks, U=24wks, L=0wks)
-- Values: `np.linspace(recovery_start, 1.0, recovery_days)`
-- Straight line from bottom back to original value (full recovery)
-
-**5. Connecting to actual data**
-- The scenario is scaled to connect smoothly with the pre-shock period:
-```python
-scenario_scaled = scenario_values * pre_shock_cumulative.iloc[-1]
+asset_shock = (beta × market_shock) + (rate_sensitivity × rate_shock) + vix_impact
+portfolio_shock = Σ(asset_shock × weight)
 ```
-- Dates continue from where actual data ends
 
-### Output
+**Crisis Shapes:**
 
-- **Table**: Each asset's beta, estimated shock, and contribution to portfolio loss
-- **Key stats**: Max drawdown, time to bottom, time at bottom, recovery time, total time underwater
-- **Timeline chart**: Visual showing actual pre-shock data → simulated crash → bottom → recovery with colour-coded phases
-- **Interpretation**: Summary of severity and what to expect
+| Shape | Crash | Bottom | Recovery | Example |
+|-------|-------|--------|----------|---------|
+| V-Shape | 4 wks | 0 wks | 12 wks | COVID March 2020 |
+| U-Shape | 8 wks | 16 wks | 24 wks | 2008 Financial Crisis |
+| L-Shape | 8 wks | 52 wks | 0 wks | Japan 1990s |
 
-### Limitations
+**Output:**
+- Table of each asset's beta, shock, and contribution
+- Key stats (max drawdown, time underwater)
+- Timeline chart showing actual data → crash → bottom → recovery
 
-- Rate sensitivity is a simplified proxy (uses volatility, not actual duration/rate exposure)
-- Recovery assumes linear path back to original value (reality is messier)
-- Bottom phase uses random noise (seeded for reproducibility)
-- Does not model correlation changes during crisis (correlations typically spike toward 1)
+## Sidebar Controls
 
+- **Ticker selection** — choose from presets or add custom (Yahoo Finance format)
+- **Weight allocation** — equal weight, custom percentages, or by £ amount
+- **Time period** — 6 months to 10 years lookback
+- **Benchmark** — SPY, QQQ, ISF.L, etc.
+- **Risk-free rate** — for Sharpe/Sortino calculations
+
+## Limitations
+
+- **Historical data** — past performance doesn't predict the future
+- **Rate sensitivity** — uses volatility as a proxy, not actual duration
+- **Recovery simulation** — assumes linear path back to original value
+- **Correlations** — doesn't model correlation spikes during crises
+- **No transaction costs** — assumes frictionless trading
+
+## Run it locally
+
+```bash
+git clone https://github.com/poggey/risk-dashboard.git
+cd risk-dashboard
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+## Project Structure
+
+```
+risk-dashboard/
+├── app.py                 # Main Streamlit application
+├── src/
+│   ├── data.py           # Price fetching and returns calculation
+│   ├── metrics.py        # Risk and performance metrics
+│   └── visualisations.py # Plotly chart functions
+├── requirements.txt
+└── README.md
+```
+
+## Stack
+
+Python 3.13 · Streamlit · Pandas · NumPy · Plotly · yfinance
+
+## What I learned
+
+- Building interactive dashboards with Streamlit and session state
+- Calculating risk metrics (VaR, CVaR, Sharpe, beta, drawdowns)
+- Factor-based stress testing vs single-asset shocks
+- Separating concerns (data / metrics / visualisation / app)
