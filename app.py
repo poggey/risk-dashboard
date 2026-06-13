@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
 import sys
@@ -242,64 +243,145 @@ with st.sidebar:
 
 ## sidebar end
 
-## main viualisations after clicking analyse
+tab1, tab2, tab3 = st.tabs(["Risk Dashboard", "Sleep Test", "Scenarios"])
+
 if analyse_button:
-    ## if true
     with st.spinner("Fetching data..."):
         try:
-            start_str = start_date.strftime('%Y-%m-%d')
-            end_str = end_date.strftime('%Y-%m-%d')
-
             prices = fetch_prices(tickers, start_date, end_date)
             returns = calculate_returns(prices)
             port_ret = portfolio_returns(returns, weights)
-            ## calls on relevant functions to then feed into visualisation functions
-            
+
             bench_prices = fetch_prices(benchmark, start_date, end_date)
             bench_ret = calculate_returns(bench_prices).iloc[:, 0]
-            ## df to 1D series
+
+            # Store in session state so data persists across reruns
+            st.session_state.port_ret = port_ret
+            st.session_state.returns = returns
+            st.session_state.bench_ret = bench_ret
+            st.session_state.analysis_weights = weights
+            st.session_state.analysis_tickers = tickers
+            st.session_state.analysis_done = True
         except Exception as e:
-            ## just a broad error identification
             st.error(f"Error fetching data: {e}")
             st.stop()
 
-    ## still inside if statement
-    ## Performance metrics - calls functions and returns them in pre-setup columns
-    st.header("Key Performance")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Annualised Return", f"{annualised_return(port_ret):.2%}")
-    c2.metric("Annualised Volatility", f"{annualised_volatility(port_ret):.2%}")
-    c3.metric("Sharpe Ratio", f"{sharpe_ratio(port_ret, risk_free_rate):.2f}")
-    c4.metric("Max Drawdown", f"{max_drawdown(port_ret):.2%}")
-    
-    ## Risk metrics row - same as above
-    st.header("Risk Metrics")
-    c5, c6, c7, c8 = st.columns(4)
-    c5.metric("95% VaR (daily)", f"{value_at_risk(port_ret):.2%}")
-    c6.metric("95% CVaR (daily)", f"{conditional_value_at_risk(port_ret):.2%}")
-    c7.metric("Sortino Ratio", f"{sortino_ratio(port_ret, risk_free_rate):.2f}")
-    c8.metric("Beta vs Benchmark", f"{beta(port_ret, bench_ret):.2f}")
-    
-    ## Performance chart
-    st.header("Performance")
-    st.plotly_chart(plot_cumulative_portfolio_returns(port_ret, bench_ret), use_container_width=True)
-    ## use_container_width=True tells streamlit to fill available space
+# Check if we have analysis data (either just computed or from previous run)
+if st.session_state.get('analysis_done', False):
+    port_ret = st.session_state.port_ret
+    returns = st.session_state.returns
+    bench_ret = st.session_state.bench_ret
 
-    ## Risk charts
-    st.header("Risk Analysis")
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.plotly_chart(plot_drawdown(port_ret), use_container_width=True)
-    with col_b:
-        st.plotly_chart(plot_return_distribution(port_ret), use_container_width=True)
-    
-    ## Rolling Sharpe
-    st.plotly_chart(plot_rolling_sharpe(port_ret), use_container_width=True)
-    
-    ## Composition charts side by side
-    st.header("Portfolio Composition")
-    col_c, col_d = st.columns(2)
-    with col_c:
-        st.plotly_chart(plot_weights(tickers, weights), use_container_width=True)
-    with col_d:
-        st.plotly_chart(plot_correlation_heatmap(returns), use_container_width=True)
+    with tab1:
+        ## Performance metrics
+        st.header("Key Performance")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Annualised Return", f"{annualised_return(port_ret):.2%}")
+        c2.metric("Annualised Volatility", f"{annualised_volatility(port_ret):.2%}")
+        c3.metric("Sharpe Ratio", f"{sharpe_ratio(port_ret, risk_free_rate):.2f}")
+        c4.metric("Max Drawdown", f"{max_drawdown(port_ret):.2%}")
+        
+        ## Risk metrics row - same as above
+        st.header("Risk Metrics")
+        c5, c6, c7, c8 = st.columns(4)
+        c5.metric("95% VaR (daily)", f"{value_at_risk(port_ret):.2%}")
+        c6.metric("95% CVaR (daily)", f"{conditional_value_at_risk(port_ret):.2%}")
+        c7.metric("Sortino Ratio", f"{sortino_ratio(port_ret, risk_free_rate):.2f}")
+        c8.metric("Beta vs Benchmark", f"{beta(port_ret, bench_ret):.2f}")
+        
+        ## Performance chart
+        st.header("Performance")
+        st.plotly_chart(plot_cumulative_portfolio_returns(port_ret, bench_ret), use_container_width=True)
+        ## use_container_width=True tells streamlit to fill available space
+
+        ## Risk charts
+        st.header("Risk Analysis")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.plotly_chart(plot_drawdown(port_ret), use_container_width=True)
+        with col_b:
+            st.plotly_chart(plot_return_distribution(port_ret), use_container_width=True)
+        
+        ## Rolling Sharpe
+        st.plotly_chart(plot_rolling_sharpe(port_ret), use_container_width=True)
+        
+        ## Composition charts side by side
+        st.header("Portfolio Composition")
+        col_c, col_d = st.columns(2)
+        with col_c:
+            st.plotly_chart(plot_weights(tickers, weights), use_container_width=True)
+        with col_d:
+            st.plotly_chart(plot_correlation_heatmap(returns), use_container_width=True)
+
+    with tab2:
+        st.header("Sleep Test")
+        st.caption("How emotionally tough would this portfolio be to hold?")
+
+        # Sliders
+        col1, col2 = st.columns(2)
+        with col1:
+            dd_tolerance = st.slider("Max drawdown you'd accept", 5, 50, 20, format="%d%%")
+            recovery_tolerance = st.slider("Max recovery period (months)", 1, 36, 12)
+            day_shock_tolerance = st.slider("Worst single day you'd accept", 1, 15, 5, format="%d%%")
+        with col2:
+            frequency_tolerance = st.slider("Panic moments per year you'd tolerate", 0, 10, 2)
+            loss_aversion = st.slider("Loss aversion factor", 1.0, 3.0, 2.0, step=0.1)
+
+        dd = drawdown_series(port_ret)
+        actual_max_dd = abs(dd.min()) * 100
+        actual_worst_day = abs(port_ret.min()) * 100
+
+        # Compute longest recovery: count consecutive days in drawdown
+        in_drawdown = (dd < 0).astype(int)
+        drawdown_groups = (in_drawdown != in_drawdown.shift()).cumsum()
+        longest_dd_days = in_drawdown.groupby(drawdown_groups).sum().max()
+        actual_recovery_months = longest_dd_days / 21  # ~21 trading days per month
+
+        # Count panic moments: days with returns below -3%
+        panic_days = (port_ret < -0.03).sum()
+        years_of_data = len(port_ret) / 252
+        panic_moments_per_year = panic_days / years_of_data if years_of_data > 0 else 0
+
+        # Score each dimension as 0-100 (how comfortable the user would be)
+        # Use max() to avoid division by zero
+        dd_score = min(100, (dd_tolerance / max(actual_max_dd, 0.01)) * 100)
+        day_score = min(100, (day_shock_tolerance / max(actual_worst_day, 0.01)) * 100)
+        recovery_score = min(100, (recovery_tolerance / max(actual_recovery_months, 0.01)) * 100)
+        frequency_score = min(100, (frequency_tolerance / max(panic_moments_per_year, 0.01)) * 100)
+
+        # Loss aversion: higher = losses feel worse = harder to sleep
+        # Linear scale from 1.0 (score=100) to 3.0 (score=33)
+        loss_aversion_score = 100 - (loss_aversion - 1.0) * 33.33
+
+        composite_score = (dd_score + day_score + recovery_score + frequency_score + loss_aversion_score) / 5
+
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=composite_score,
+            title={'text': "Sleep Test Score"},
+            gauge={'axis': {'range': [0, 100]},
+                'bar': {'color': "darkblue"},
+                'steps': [
+                    {'range': [0, 33], 'color': "lightcoral"},
+                    {'range': [33, 67], 'color': "lightyellow"},
+                    {'range': [67, 100], 'color': "lightgreen"}]}))
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Radar chart
+        categories = ['Drawdown', 'Recovery', 'Daily Shock', 'Frequency', 'Loss Aversion']
+        fig_radar = go.Figure()
+        fig_radar.add_trace(go.Scatterpolar(
+            r=[dd_score, recovery_score, day_score, frequency_score, loss_aversion_score],
+            theta=categories,
+            fill='toself',
+            name='Your Portfolio'
+        ))
+        fig_radar.add_trace(go.Scatterpolar(
+            r=[100, 100, 100, 100, 100],
+            theta=categories,
+            fill='toself',
+            name='Ideal',
+            opacity=0.3
+        ))
+        fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])))
+        st.plotly_chart(fig_radar, use_container_width=True)
